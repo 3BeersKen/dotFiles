@@ -1,0 +1,8 @@
+# ~/.config/zsh/.zprofile
+
+path=(
+    $HOME/.local/bin
+    $path
+)
+
+export PATH
