@@ -31,4 +31,5 @@ setopt APPEND_HISTORY
 setopt SHARE_HISTORY
 
 # --- Look & Feel ---
+source $ZDOTDIR/aliases
 eval "$(starship init zsh)"
