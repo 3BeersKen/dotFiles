@@ -1,0 +1,14 @@
+# XDG environment defaults
+# These are default-only assignments; callers can override via exported env vars.
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+
+# Disable macOS Terminal's built-in shell session files under ${ZDOTDIR:-$HOME}.
+# A custom XDG-native session mechanism is configured in .zshrc.
+export SHELL_SESSIONS_DISABLE="${SHELL_SESSIONS_DISABLE:-1}"
+
+# Keep zsh history in XDG state instead of config.
+# Directory creation happens in .zshrc (interactive shells) to keep .zshenv lightweight.
+export HISTFILE="$XDG_STATE_HOME/zsh/history"
