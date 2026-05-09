@@ -1,35 +1,105 @@
-# ~/.config/zsh/.zshrc
+# Interactive zsh config.
 
-readonly ZSH_COMPDUMP="$XDG_CACHE_HOME/zsh/zcompdump-ZSH_VERSION"
+# Paths and core settings.
+typeset -g HISTFILE="${XDG_STATE_HOME:-$HOME/.local/state}/zsh/history"
+typeset -g ZIM_CONFIG_FILE="${ZIM_CONFIG_FILE:-${ZDOTDIR}/.zimrc}"
+typeset -g ZIM_HOME="${ZIM_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/zim}"
 
-export EDITOR=nvim
-export STARSHIP_CONFIG="$XDG_CONFIG_HOME/starship/starship.toml"
+# XDG-backed runtime paths.
+typeset -g ZSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
+typeset -g ZSH_COMPDUMP="${ZSH_COMPDUMP:-$ZSH_CACHE_DIR/zcompdump-${HOST}-${ZSH_VERSION}}"
+typeset -g ZSH_COMPLETION_CACHE_DIR="${ZSH_CACHE_DIR}/completion"
+typeset -g ZSH_SESSION_DIR="${ZSH_SESSION_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/zsh/sessions}"
+typeset -g ZSH_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/zsh"
+typeset -g ZSH_ALIASES_FILE="${ZSH_ALIASES_FILE:-${ZDOTDIR}/aliases}"
 
-# --- Directory Auto Creation ---
-[[ ! -d "$XDG_CACHE_HOME/zsh" ]] && mkdir -p "$XDG_CACHE_HOME/zsh"
-[[ ! -d "$XDG_STATE_HOME/zsh" ]] && mkdir -p "$XDG_STATE_HOME/zsh"
+# Completion dump is keyed by host and zsh version.
 
-# --- Completion System ---
-autoload -Uz compinit
-compinit -d "$ZSH_COMPDUMP"
+# Ensure required directories exist.
+# Batch directory creation so startup pays for at most one mkdir invocation.
+typeset -ga _zsh_missing_dirs=()
+for _dir in "$ZIM_HOME" "$ZSH_CACHE_DIR" "$ZSH_STATE_DIR" "$ZSH_COMPLETION_CACHE_DIR" "$ZSH_SESSION_DIR"; do
+	[[ -d "$_dir" ]] || _zsh_missing_dirs+=("$_dir")
+done
+(( ${#_zsh_missing_dirs[@]} > 0 )) && mkdir -p -- "${_zsh_missing_dirs[@]}"
+unset _dir
+unset _zsh_missing_dirs
 
-# Optimisation: re-run if > 24-hours old
-if [[ ! "$ZSH_COMPDUMP" -nt "${ZDOTDIR:-$HOME}/.zshrc" ]]; then
-  compinit -C -d "$ZSH_COMPDUMP"
-fi
-
-zstyle ':completion:*' cache-path "$XDG_CACHE_HOME/zsh/zcompcache"
-zstyle ':completion:*' menu select
+# Completion caching.
+zstyle ':zim:completion' dumpfile "$ZSH_COMPDUMP"
 zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "$ZSH_COMPLETION_CACHE_DIR"
 
-# --- History Configuration ---
-HISTFILE="$XDG_STATE_HOME/zsh/history"
-HISTSIZE=10000
-SAVEHIST=10000
+# Zim manager setup and module initialization.
+# Best-practice note: avoid network access in startup paths for predictable shell latency.
+_zimfw_bootstrap() {
+	[[ -e "${ZIM_HOME}/zimfw.zsh" ]] && return 0
+	if ! (( ${+commands[git]} )); then
+		print -u2 "Warning: git not found. Zim framework will not be installed."
+		return 1
+	fi
+	command git clone --depth=1 "https://github.com/zimfw/zimfw.git" "${ZIM_HOME}"
+}
 
-setopt APPEND_HISTORY
-setopt SHARE_HISTORY
+_zimfw_generate_init() {
+	[[ -f "${ZIM_HOME}/init.zsh" && "${ZIM_HOME}/init.zsh" -nt "${ZIM_CONFIG_FILE}" ]] && return 0
+	source "${ZIM_HOME}/zimfw.zsh" init
+}
 
-# --- Look & Feel ---
-source $ZDOTDIR/aliases
-eval "$(starship init zsh)"
+_zimfw_load_init() {
+	[[ -f "${ZIM_HOME}/init.zsh" ]] || return 0
+	source "${ZIM_HOME}/init.zsh"
+}
+
+_zimfw_setup() {
+	_zimfw_bootstrap || return 0
+	_zimfw_generate_init
+	_zimfw_load_init
+}
+
+# Source optional local config fragments from the XDG zsh directory.
+_zsh_source_if_readable() {
+	[[ -r "$1" ]] || return 0
+	source "$1"
+}
+
+# Explicit maintenance entrypoint for module updates (manual on demand, not at startup).
+zim_update() {
+	(( ${+commands[git]} )) || { print -u2 'git is required for zim updates'; return 1; }
+	[[ -f "${ZIM_HOME}/zimfw.zsh" ]] || { print -u2 'zimfw is not installed'; return 1; }
+	source "${ZIM_HOME}/zimfw.zsh" update
+}
+
+# Per-terminal session restore/save in XDG state.
+_zsh_session_restore_xdg() {
+	[[ -r "$ZSH_SESSION_FILE" ]] || return 0
+	source "$ZSH_SESSION_FILE"
+	command rm -f "$ZSH_SESSION_FILE"
+}
+
+_zsh_session_save_xdg() {
+	[[ -n "$ZSH_SESSION_FILE" ]] || return 0
+	( umask 077; printf 'builtin cd -- %q\n' "$PWD" >| "$ZSH_SESSION_FILE" )
+}
+
+_zsh_session_setup_xdg() {
+	local session_id
+
+	# macOS Terminal provides TERM_SESSION_ID; Linux terminals usually do not.
+	session_id="${TERM_SESSION_ID:-$TTY}"
+	[[ -n "$session_id" ]] || session_id="pid-$$"
+	session_id="${session_id//\//_}"
+	typeset -g ZSH_SESSION_FILE="$ZSH_SESSION_DIR/${session_id}.zsh"
+
+	_zsh_session_restore_xdg
+
+	# Keep exactly one zshexit hook registration to avoid duplicate writes.
+	autoload -Uz add-zsh-hook
+	add-zsh-hook -d zshexit _zsh_session_save_xdg 2>/dev/null
+	add-zsh-hook zshexit _zsh_session_save_xdg
+}
+
+# Run setup flows.
+_zimfw_setup
+_zsh_source_if_readable "$ZSH_ALIASES_FILE"
+_zsh_session_setup_xdg
